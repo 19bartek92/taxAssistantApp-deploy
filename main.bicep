@@ -159,7 +159,7 @@ resource nsaDetailKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   name: 'setupGithubToken'
   location: location
-  kind: 'AzureCLI'
+  kind: 'AzurePowerShell'
   dependsOn: [
     webApp
     keyVaultAccessPolicy
@@ -169,7 +169,7 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     roleAssignment
   ]
   properties: {
-    azCliVersion: '2.53.0'
+    azPowerShellVersion: '11.0'
     environmentVariables: [
       { name: 'WEBAPP_NAME', value: webAppName }
       { name: 'RG_NAME', value: resourceGroup().name }
@@ -178,9 +178,10 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
       { name: 'BRANCH', value: repositoryBranch }
     ]
     scriptContent: '''
-      az webapp deployment source update-token --git-token $GITHUB_PAT
-      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \
-        --repo-url $REPO_URL --branch $BRANCH --manual-integration
+      Write-Host "Configuring GitHub deployment..."
+      Start-Sleep -Seconds 30
+      az webapp deployment source update-token --git-token $env:GITHUB_PAT
+      az webapp deployment source config --name $env:WEBAPP_NAME --resource-group $env:RG_NAME --repo-url $env:REPO_URL --branch $env:BRANCH --manual-integration
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'
