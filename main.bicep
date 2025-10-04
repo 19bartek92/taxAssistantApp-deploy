@@ -165,6 +165,8 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     keyVaultAccessPolicy
     nsaSearchKeySecret
     nsaDetailKeySecret
+    managedIdentity
+    roleAssignment
   ]
   properties: {
     azCliVersion: '2.53.0'
@@ -178,11 +180,31 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     scriptContent: '''
       az webapp deployment source update-token --git-token $GITHUB_PAT
       az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \
-        --repo-url $REPO_URL --branch $BRANCH --manual-integration true
+        --repo-url $REPO_URL --branch $BRANCH --manual-integration
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'
     timeout: 'PT10M'
+  }
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentity.id}': {}
+    }
+  }
+}
+
+resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'deployment-identity'
+  location: location
+}
+
+resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, managedIdentity.id, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "771658466499677136"
+      "templateHash": "13615125487759373344"
     }
   },
   "parameters": {
@@ -263,16 +263,43 @@
             "value": "[parameters('repositoryBranch')]"
           }
         ],
-        "scriptContent": "      az webapp deployment source update-token --git-token $GITHUB_PAT\n      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \\\n        --repo-url $REPO_URL --branch $BRANCH --manual-integration true\n    ",
+        "scriptContent": "      az webapp deployment source update-token --git-token $GITHUB_PAT\n      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \\\n        --repo-url $REPO_URL --branch $BRANCH --manual-integration\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"
       },
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'))]": {}
+        }
+      },
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults/accessPolicies', parameters('keyVaultName'), 'add')]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity')]",
         "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-detail-key')]",
         "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-search-key')]",
+        "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), 'b24988ac-6180-42a0-ab88-20f7382dd24c'))]",
         "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "deployment-identity",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity')]"
       ]
     }
   ],
