@@ -156,6 +156,20 @@ resource nsaDetailKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
+resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'deployment-identity'
+  location: location
+}
+
+resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, managedIdentity.id, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   name: 'setupGitHubDeployment'
   location: location
@@ -165,6 +179,8 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
     keyVaultAccessPolicy
     nsaSearchKeySecret
     nsaDetailKeySecret
+    managedIdentity
+    roleAssignment
   ]
   properties: {
     azCliVersion: '2.53.0'
@@ -189,7 +205,13 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
         --repository-type github \
         --manual-integration false
       
-      echo "GitHub deployment configured successfully!"
+      # Trigger initial deployment to pull the code and build the app
+      echo "Triggering initial deployment..."
+      az webapp deployment source sync \
+        --name $WEBAPP_NAME \
+        --resource-group $RG_NAME
+      
+      echo "GitHub deployment configured and initial sync completed!"
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'
@@ -200,20 +222,6 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
     userAssignedIdentities: {
       '${managedIdentity.id}': {}
     }
-  }
-}
-
-resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: 'deployment-identity'
-  location: location
-}
-
-resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, managedIdentity.id, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
-    principalId: managedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
   }
 }
 
