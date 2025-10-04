@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "11643175219751906285"
+      "templateHash": "4755799306412121042"
     }
   },
   "parameters": {
@@ -272,7 +272,7 @@
       "location": "[parameters('location')]",
       "kind": "AzureCLI",
       "properties": {
-        "azCliVersion": "2.77.0",
+        "azCliVersion": "2.76.0",
         "environmentVariables": [
           {
             "name": "WEBAPP_NAME",
