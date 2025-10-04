@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "5151129143946292561"
+      "templateHash": "17155303896934625051"
     }
   },
   "parameters": {
@@ -263,7 +263,7 @@
             "value": "[parameters('repositoryBranch')]"
           }
         ],
-        "scriptContent": "      echo \"Configuring GitHub deployment via direct resource API...\"\n      \n      # Set GitHub PAT token at subscription level\n      echo \"Setting GitHub PAT token...\"\n      az rest --method PUT \\\n        --url \"https://management.azure.com/providers/Microsoft.Web/sourcecontrols/GitHub?api-version=2023-01-01\" \\\n        --body \"{\\\"properties\\\":{\\\"token\\\":\\\"$GITHUB_PAT\\\"}}\"\n      \n      # Configure source control for the web app\n      echo \"Configuring source control for app...\"\n      az rest --method PUT \\\n        --url \"https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$WEBAPP_NAME/sourcecontrols/web?api-version=2023-01-01\" \\\n        --body \"{\\\"properties\\\":{\\\"repoUrl\\\":\\\"$REPO_URL\\\",\\\"branch\\\":\\\"$BRANCH\\\",\\\"isManualIntegration\\\":true}}\"\n      \n      echo \"GitHub deployment configured successfully!\"\n    ",
+        "scriptContent": "      echo \"Configuring GitHub deployment via direct resource API...\"\n      \n      # Set GitHub PAT token at subscription level\n      echo \"Setting GitHub PAT token...\"\n      az rest --method PUT \\\n        --url \"https://management.azure.com/providers/Microsoft.Web/sourcecontrols/GitHub?api-version=2023-01-01\" \\\n        --body \"{\\\"properties\\\":{\\\"token\\\":\\\"$GITHUB_PAT\\\"}}\"\n      \n      # Configure source control for the web app\n      echo \"Configuring source control for app...\"\n      az rest --method PUT \\\n        --url \"https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$WEBAPP_NAME/sourcecontrols/web?api-version=2023-01-01\" \\\n        --body \"{\\\"properties\\\":{\\\"repoUrl\\\":\\\"$REPO_URL\\\",\\\"branch\\\":\\\"$BRANCH\\\",\\\"isManualIntegration\\\":true}}\"\n      \n      # Trigger initial deployment\n      echo \"Triggering initial deployment...\"\n      az webapp deployment source sync \\\n        --resource-group $RG_NAME \\\n        --name $WEBAPP_NAME\n      \n      echo \"GitHub deployment configured and initial sync completed!\"\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"

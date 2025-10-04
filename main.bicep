@@ -192,7 +192,13 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
         --url "https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$WEBAPP_NAME/sourcecontrols/web?api-version=2023-01-01" \
         --body "{\"properties\":{\"repoUrl\":\"$REPO_URL\",\"branch\":\"$BRANCH\",\"isManualIntegration\":true}}"
       
-      echo "GitHub deployment configured successfully!"
+      # Trigger initial deployment
+      echo "Triggering initial deployment..."
+      az webapp deployment source sync \
+        --resource-group $RG_NAME \
+        --name $WEBAPP_NAME
+      
+      echo "GitHub deployment configured and initial sync completed!"
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'
