@@ -17,7 +17,7 @@ param location string = 'West Europe'
   'P1v3'
   'P2v3'
 ])
-param sku string = 'F1'
+param sku string = 'B1'
 
 @description('Git repository URL')
 param repositoryUrl string = 'https://github.com/19bartek92/taxAssistantApp.git'
@@ -194,18 +194,23 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
     scriptContent: '''
       echo "Configuring GitHub deployment using Azure CLI..."
       
-      # Configure source control with GitHub PAT
-      echo "Setting up source control..."
+      # Step 1: Save PAT token in App Service
+      echo "Setting GitHub PAT token..."
+      az webapp deployment source update-token \
+        --name $WEBAPP_NAME \
+        --resource-group $RG_NAME \
+        --git-token $GITHUB_PAT
+      
+      # Step 2: Configure source control (without manual-integration flag)
+      echo "Configuring source control..."
       az webapp deployment source config \
         --name $WEBAPP_NAME \
         --resource-group $RG_NAME \
         --repo-url $REPO_URL \
         --branch $BRANCH \
-        --git-token $GITHUB_PAT \
-        --repository-type github \
-        --manual-integration false
+        --repository-type github
       
-      # Trigger initial deployment to pull the code and build the app
+      # Step 3: Trigger initial deployment
       echo "Triggering initial deployment..."
       az webapp deployment source sync \
         --name $WEBAPP_NAME \

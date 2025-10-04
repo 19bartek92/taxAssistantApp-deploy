@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "11703654076042343740"
+      "templateHash": "4403415026911435989"
     }
   },
   "parameters": {
@@ -32,7 +32,7 @@
     },
     "sku": {
       "type": "string",
-      "defaultValue": "F1",
+      "defaultValue": "B1",
       "allowedValues": [
         "F1",
         "B1",
@@ -282,7 +282,7 @@
             "value": "[parameters('repositoryBranch')]"
           }
         ],
-        "scriptContent": "      echo \"Configuring GitHub deployment using Azure CLI...\"\n      \n      # Configure source control with GitHub PAT\n      echo \"Setting up source control...\"\n      az webapp deployment source config \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME \\\n        --repo-url $REPO_URL \\\n        --branch $BRANCH \\\n        --git-token $GITHUB_PAT \\\n        --repository-type github \\\n        --manual-integration false\n      \n      # Trigger initial deployment to pull the code and build the app\n      echo \"Triggering initial deployment...\"\n      az webapp deployment source sync \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME\n      \n      echo \"GitHub deployment configured and initial sync completed!\"\n    ",
+        "scriptContent": "      echo \"Configuring GitHub deployment using Azure CLI...\"\n      \n      # Step 1: Save PAT token in App Service\n      echo \"Setting GitHub PAT token...\"\n      az webapp deployment source update-token \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME \\\n        --git-token $GITHUB_PAT\n      \n      # Step 2: Configure source control (without manual-integration flag)\n      echo \"Configuring source control...\"\n      az webapp deployment source config \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME \\\n        --repo-url $REPO_URL \\\n        --branch $BRANCH \\\n        --repository-type github\n      \n      # Step 3: Trigger initial deployment\n      echo \"Triggering initial deployment...\"\n      az webapp deployment source sync \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME\n      \n      echo \"GitHub deployment configured and initial sync completed!\"\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"
