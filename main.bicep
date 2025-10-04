@@ -178,33 +178,21 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
       { name: 'BRANCH', value: repositoryBranch }
     ]
     scriptContent: '''
-      echo "Waiting for managed identity propagation..."
-      max_attempts=12
-      attempt=1
+      echo "Configuring GitHub deployment via direct resource API..."
       
-      while [ $attempt -le $max_attempts ]; do
-        echo "Attempt $attempt/$max_attempts - Checking identity..."
-        
-        identity=$(az identity show --name deployment-identity --resource-group $RG_NAME --query principalId -o tsv 2>/dev/null)
-        if [ ! -z "$identity" ] && [ "$identity" != "" ]; then
-          echo "Identity found: $identity"
-          break
-        fi
-        
-        if [ $attempt -eq $max_attempts ]; then
-          echo "ERROR: Identity propagation timeout after $((max_attempts * 10)) seconds"
-          exit 1
-        fi
-        
-        echo "Identity not ready yet, waiting 10 seconds..."
-        sleep 10
-        attempt=$((attempt + 1))
-      done
+      # Set GitHub PAT token at subscription level
+      echo "Setting GitHub PAT token..."
+      az rest --method PUT \
+        --url "https://management.azure.com/providers/Microsoft.Web/sourcecontrols/GitHub?api-version=2023-01-01" \
+        --body "{\"properties\":{\"token\":\"$GITHUB_PAT\"}}"
       
-      echo "Configuring GitHub deployment..."
-      az webapp deployment source update-token --git-token $GITHUB_PAT
-      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \
-        --repo-url $REPO_URL --branch $BRANCH --manual-integration
+      # Configure source control for the web app
+      echo "Configuring source control for app..."
+      az rest --method PUT \
+        --url "https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$WEBAPP_NAME/sourcecontrols/web?api-version=2023-01-01" \
+        --body "{\"properties\":{\"repoUrl\":\"$REPO_URL\",\"branch\":\"$BRANCH\",\"isManualIntegration\":true}}"
+      
+      echo "GitHub deployment configured successfully!"
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'

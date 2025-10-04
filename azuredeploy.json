@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "2181287449569977718"
+      "templateHash": "5151129143946292561"
     }
   },
   "parameters": {
@@ -263,7 +263,7 @@
             "value": "[parameters('repositoryBranch')]"
           }
         ],
-        "scriptContent": "      echo \"Waiting for managed identity propagation...\"\n      max_attempts=12\n      attempt=1\n      \n      while [ $attempt -le $max_attempts ]; do\n        echo \"Attempt $attempt/$max_attempts - Checking identity...\"\n        \n        identity=$(az identity show --name deployment-identity --resource-group $RG_NAME --query principalId -o tsv 2>/dev/null)\n        if [ ! -z \"$identity\" ] && [ \"$identity\" != \"\" ]; then\n          echo \"Identity found: $identity\"\n          break\n        fi\n        \n        if [ $attempt -eq $max_attempts ]; then\n          echo \"ERROR: Identity propagation timeout after $((max_attempts * 10)) seconds\"\n          exit 1\n        fi\n        \n        echo \"Identity not ready yet, waiting 10 seconds...\"\n        sleep 10\n        attempt=$((attempt + 1))\n      done\n      \n      echo \"Configuring GitHub deployment...\"\n      az webapp deployment source update-token --git-token $GITHUB_PAT\n      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \\\n        --repo-url $REPO_URL --branch $BRANCH --manual-integration\n    ",
+        "scriptContent": "      echo \"Configuring GitHub deployment via direct resource API...\"\n      \n      # Set GitHub PAT token at subscription level\n      echo \"Setting GitHub PAT token...\"\n      az rest --method PUT \\\n        --url \"https://management.azure.com/providers/Microsoft.Web/sourcecontrols/GitHub?api-version=2023-01-01\" \\\n        --body \"{\\\"properties\\\":{\\\"token\\\":\\\"$GITHUB_PAT\\\"}}\"\n      \n      # Configure source control for the web app\n      echo \"Configuring source control for app...\"\n      az rest --method PUT \\\n        --url \"https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$WEBAPP_NAME/sourcecontrols/web?api-version=2023-01-01\" \\\n        --body \"{\\\"properties\\\":{\\\"repoUrl\\\":\\\"$REPO_URL\\\",\\\"branch\\\":\\\"$BRANCH\\\",\\\"isManualIntegration\\\":true}}\"\n      \n      echo \"GitHub deployment configured successfully!\"\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"
