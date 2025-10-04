@@ -210,20 +210,18 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
       echo "REPO_URL: $REPO_URL"
       echo "BRANCH: $BRANCH"
       
-      # Step 1: Save PAT token in App Service
+      # Step 1: Save PAT token globally (no webapp-specific params)
       echo "Setting GitHub PAT token..."
-      az webapp deployment source update-token \
-        --name $WEBAPP_NAME \
-        --resource-group $RG_NAME \
-        --git-token $GITHUB_PAT || echo "update-token FAILED: $?"
+      az webapp deployment source update-token --git-token $GITHUB_PAT || echo "update-token FAILED: $?"
       
-      # Step 2: Configure source control (without manual-integration flag)
+      # Step 2: Configure source control with PAT
       echo "Configuring source control..."
       az webapp deployment source config \
         --name $WEBAPP_NAME \
         --resource-group $RG_NAME \
         --repo-url $REPO_URL \
         --branch $BRANCH \
+        --git-token $GITHUB_PAT \
         --repository-type github || echo "config FAILED: $?"
       
       # Step 3: Trigger initial deployment

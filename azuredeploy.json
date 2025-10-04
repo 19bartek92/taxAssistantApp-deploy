@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "6166028645544954008"
+      "templateHash": "11643175219751906285"
     }
   },
   "parameters": {
@@ -295,7 +295,7 @@
             "value": "[parameters('repositoryBranch')]"
           }
         ],
-        "scriptContent": "      set -e\n      echo \"Configuring GitHub deployment using Azure CLI...\"\n      echo \"WEBAPP_NAME: $WEBAPP_NAME\"\n      echo \"RG_NAME: $RG_NAME\"\n      echo \"REPO_URL: $REPO_URL\"\n      echo \"BRANCH: $BRANCH\"\n      \n      # Step 1: Save PAT token in App Service\n      echo \"Setting GitHub PAT token...\"\n      az webapp deployment source update-token \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME \\\n        --git-token $GITHUB_PAT || echo \"update-token FAILED: $?\"\n      \n      # Step 2: Configure source control (without manual-integration flag)\n      echo \"Configuring source control...\"\n      az webapp deployment source config \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME \\\n        --repo-url $REPO_URL \\\n        --branch $BRANCH \\\n        --repository-type github || echo \"config FAILED: $?\"\n      \n      # Step 3: Trigger initial deployment\n      echo \"Triggering initial deployment...\"\n      az webapp deployment source sync \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME || echo \"sync FAILED: $?\"\n      \n      echo \"GitHub deployment configured and initial sync completed!\"\n    ",
+        "scriptContent": "      set -e\n      echo \"Configuring GitHub deployment using Azure CLI...\"\n      echo \"WEBAPP_NAME: $WEBAPP_NAME\"\n      echo \"RG_NAME: $RG_NAME\"\n      echo \"REPO_URL: $REPO_URL\"\n      echo \"BRANCH: $BRANCH\"\n      \n      # Step 1: Save PAT token globally (no webapp-specific params)\n      echo \"Setting GitHub PAT token...\"\n      az webapp deployment source update-token --git-token $GITHUB_PAT || echo \"update-token FAILED: $?\"\n      \n      # Step 2: Configure source control with PAT\n      echo \"Configuring source control...\"\n      az webapp deployment source config \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME \\\n        --repo-url $REPO_URL \\\n        --branch $BRANCH \\\n        --git-token $GITHUB_PAT \\\n        --repository-type github || echo \"config FAILED: $?\"\n      \n      # Step 3: Trigger initial deployment\n      echo \"Triggering initial deployment...\"\n      az webapp deployment source sync \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME || echo \"sync FAILED: $?\"\n      \n      echo \"GitHub deployment configured and initial sync completed!\"\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"
