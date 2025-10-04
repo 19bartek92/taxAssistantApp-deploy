@@ -97,16 +97,16 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
           value: 'Production'
         }
         {
-          name: 'WEBSITE_RUN_FROM_PACKAGE'
-          value: '1'
-        }
-        {
           name: 'KeyVaultUri'
           value: keyVault.properties.vaultUri
         }
         {
           name: 'DEPLOYMENT_TIMESTAMP'
           value: forceRedeploy
+        }
+        {
+          name: 'WEBSITE_WEBDEPLOY_USE_SCM'
+          value: 'true'
         }
       ]
       alwaysOn: sku != 'F1' && sku != 'B1'
@@ -194,7 +194,7 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
     websiteContributorRole
   ]
   properties: {
-    azCliVersion: '2.53.0'
+    azCliVersion: '2.77.0'
     environmentVariables: [
       { name: 'WEBAPP_NAME', value: webApp.name }
       { name: 'RG_NAME', value: resourceGroup().name }

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "18117230164861001939"
+      "templateHash": "6166028645544954008"
     }
   },
   "parameters": {
@@ -158,16 +158,16 @@
               "value": "Production"
             },
             {
-              "name": "WEBSITE_RUN_FROM_PACKAGE",
-              "value": "1"
-            },
-            {
               "name": "KeyVaultUri",
               "value": "[reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri]"
             },
             {
               "name": "DEPLOYMENT_TIMESTAMP",
               "value": "[parameters('forceRedeploy')]"
+            },
+            {
+              "name": "WEBSITE_WEBDEPLOY_USE_SCM",
+              "value": "true"
             }
           ],
           "alwaysOn": "[and(not(equals(parameters('sku'), 'F1')), not(equals(parameters('sku'), 'B1')))]",
@@ -272,7 +272,7 @@
       "location": "[parameters('location')]",
       "kind": "AzureCLI",
       "properties": {
-        "azCliVersion": "2.53.0",
+        "azCliVersion": "2.77.0",
         "environmentVariables": [
           {
             "name": "WEBAPP_NAME",
