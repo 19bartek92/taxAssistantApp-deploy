@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "15025057189306391364"
+      "templateHash": "18026804211492771692"
     }
   },
   "parameters": {
@@ -25,7 +25,7 @@
     },
     "location": {
       "type": "string",
-      "defaultValue": "West Europe",
+      "defaultValue": "East US",
       "metadata": {
         "description": "Location for all resources"
       }
