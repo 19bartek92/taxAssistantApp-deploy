@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "6884648098935196238"
+      "templateHash": "6656610825591427533"
     }
   },
   "parameters": {
@@ -46,20 +46,6 @@
         "description": "SKU for App Service Plan"
       }
     },
-    "repositoryUrl": {
-      "type": "string",
-      "defaultValue": "https://github.com/19bartek92/taxAssistantApp.git",
-      "metadata": {
-        "description": "Git repository URL"
-      }
-    },
-    "repositoryBranch": {
-      "type": "string",
-      "defaultValue": "main",
-      "metadata": {
-        "description": "Git repository branch"
-      }
-    },
     "nsaSearchApiKey": {
       "type": "securestring",
       "defaultValue": "",
@@ -72,12 +58,6 @@
       "defaultValue": "",
       "metadata": {
         "description": "NSA Detail API Key"
-      }
-    },
-    "gitHubPat": {
-      "type": "securestring",
-      "metadata": {
-        "description": "GitHub PAT used to configure Deployment Center"
       }
     },
     "keyVaultName": {
@@ -231,75 +211,6 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.Resources/deploymentScripts",
-      "apiVersion": "2023-08-01",
-      "name": "setupGithubToken",
-      "location": "[parameters('location')]",
-      "kind": "AzureCLI",
-      "properties": {
-        "azCliVersion": "2.53.0",
-        "environmentVariables": [
-          {
-            "name": "WEBAPP_NAME",
-            "value": "[parameters('webAppName')]"
-          },
-          {
-            "name": "RG_NAME",
-            "value": "[resourceGroup().name]"
-          },
-          {
-            "name": "GITHUB_PAT",
-            "secureValue": "[parameters('gitHubPat')]"
-          },
-          {
-            "name": "REPO_URL",
-            "value": "[parameters('repositoryUrl')]"
-          },
-          {
-            "name": "BRANCH",
-            "value": "[parameters('repositoryBranch')]"
-          }
-        ],
-        "scriptContent": "      echo \"Configuring GitHub deployment via direct resource API...\"\n      \n      # Set GitHub PAT token at subscription level\n      echo \"Setting GitHub PAT token...\"\n      az rest --method PUT \\\n        --url \"https://management.azure.com/providers/Microsoft.Web/sourcecontrols/GitHub?api-version=2023-01-01\" \\\n        --body \"{\\\"properties\\\":{\\\"token\\\":\\\"$GITHUB_PAT\\\"}}\"\n      \n      # Configure source control for the web app\n      echo \"Configuring source control for app...\"\n      az rest --method PUT \\\n        --url \"https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$WEBAPP_NAME/sourcecontrols/web?api-version=2023-01-01\" \\\n        --body \"{\\\"properties\\\":{\\\"repoUrl\\\":\\\"$REPO_URL\\\",\\\"branch\\\":\\\"$BRANCH\\\",\\\"isManualIntegration\\\":false}}\"\n      \n      # Trigger initial deployment\n      echo \"Triggering initial deployment...\"\n      az webapp deployment source sync \\\n        --resource-group $RG_NAME \\\n        --name $WEBAPP_NAME\n      \n      echo \"GitHub deployment configured and initial sync completed!\"\n    ",
-        "cleanupPreference": "OnSuccess",
-        "retentionInterval": "P1D",
-        "timeout": "PT10M"
-      },
-      "identity": {
-        "type": "UserAssigned",
-        "userAssignedIdentities": {
-          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'))]": {}
-        }
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.KeyVault/vaults/accessPolicies', parameters('keyVaultName'), 'add')]",
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity')]",
-        "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-detail-key')]",
-        "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-search-key')]",
-        "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), 'b24988ac-6180-42a0-ab88-20f7382dd24c'))]",
-        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
-      "apiVersion": "2023-01-31",
-      "name": "deployment-identity",
-      "location": "[parameters('location')]"
-    },
-    {
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "name": "[guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
-      "properties": {
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
-        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), '2023-01-31').principalId]",
-        "principalType": "ServicePrincipal"
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity')]"
       ]
     }
   ],

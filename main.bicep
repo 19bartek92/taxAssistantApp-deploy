@@ -19,11 +19,7 @@ param location string = 'West Europe'
 ])
 param sku string = 'F1'
 
-@description('Git repository URL')
-param repositoryUrl string = 'https://github.com/19bartek92/taxAssistantApp.git'
-
-@description('Git repository branch')
-param repositoryBranch string = 'main'
+// Repository configuration will be done via GitHub App in Azure Portal
 
 @description('NSA Search API Key')
 @secure()
@@ -33,9 +29,7 @@ param nsaSearchApiKey string = ''
 @secure()
 param nsaDetailApiKey string = ''
 
-@description('GitHub PAT used to configure Deployment Center')
-@secure()
-param gitHubPat string
+// GitHub integration will be configured via GitHub App (no PAT needed)
 
 @description('Key Vault Name')
 param keyVaultName string = 'kv-${uniqueString(resourceGroup().id)}'
@@ -156,75 +150,7 @@ resource nsaDetailKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
-resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
-  name: 'setupGithubToken'
-  location: location
-  kind: 'AzureCLI'
-  dependsOn: [
-    webApp
-    keyVaultAccessPolicy
-    nsaSearchKeySecret
-    nsaDetailKeySecret
-    managedIdentity
-    roleAssignment
-  ]
-  properties: {
-    azCliVersion: '2.53.0'
-    environmentVariables: [
-      { name: 'WEBAPP_NAME', value: webAppName }
-      { name: 'RG_NAME', value: resourceGroup().name }
-      { name: 'GITHUB_PAT', secureValue: gitHubPat }
-      { name: 'REPO_URL', value: repositoryUrl }
-      { name: 'BRANCH', value: repositoryBranch }
-    ]
-    scriptContent: '''
-      echo "Configuring GitHub deployment via direct resource API..."
-      
-      # Set GitHub PAT token at subscription level
-      echo "Setting GitHub PAT token..."
-      az rest --method PUT \
-        --url "https://management.azure.com/providers/Microsoft.Web/sourcecontrols/GitHub?api-version=2023-01-01" \
-        --body "{\"properties\":{\"token\":\"$GITHUB_PAT\"}}"
-      
-      # Configure source control for the web app
-      echo "Configuring source control for app..."
-      az rest --method PUT \
-        --url "https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$WEBAPP_NAME/sourcecontrols/web?api-version=2023-01-01" \
-        --body "{\"properties\":{\"repoUrl\":\"$REPO_URL\",\"branch\":\"$BRANCH\",\"isManualIntegration\":false}}"
-      
-      # Trigger initial deployment
-      echo "Triggering initial deployment..."
-      az webapp deployment source sync \
-        --resource-group $RG_NAME \
-        --name $WEBAPP_NAME
-      
-      echo "GitHub deployment configured and initial sync completed!"
-    '''
-    cleanupPreference: 'OnSuccess'
-    retentionInterval: 'P1D'
-    timeout: 'PT10M'
-  }
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${managedIdentity.id}': {}
-    }
-  }
-}
-
-resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: 'deployment-identity'
-  location: location
-}
-
-resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, managedIdentity.id, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
-    principalId: managedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// GitHub integration will be configured manually via Azure Portal using GitHub App
 
 output webAppUrl string = 'https://${webApp.properties.defaultHostName}'
 output webAppName string = webApp.name
