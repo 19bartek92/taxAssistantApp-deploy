@@ -17,7 +17,7 @@ param location string = 'West Europe'
   'P1v3'
   'P2v3'
 ])
-param sku string = 'B1'
+param sku string = 'S1'
 
 @description('Git repository URL')
 param repositoryUrl string = 'https://github.com/19bartek92/taxAssistantApp.git'
@@ -185,6 +185,7 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
   location: location
   kind: 'AzureCLI'
   dependsOn: [
+    webApp
     keyVaultAccessPolicy
     nsaSearchKeySecret
     nsaDetailKeySecret
