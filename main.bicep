@@ -191,14 +191,19 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
       { name: 'BRANCH', value: repositoryBranch }
     ]
     scriptContent: '''
+      set -e
       echo "Configuring GitHub deployment using Azure CLI..."
+      echo "WEBAPP_NAME: $WEBAPP_NAME"
+      echo "RG_NAME: $RG_NAME"
+      echo "REPO_URL: $REPO_URL"
+      echo "BRANCH: $BRANCH"
       
       # Step 1: Save PAT token in App Service
       echo "Setting GitHub PAT token..."
       az webapp deployment source update-token \
         --name $WEBAPP_NAME \
         --resource-group $RG_NAME \
-        --git-token $GITHUB_PAT
+        --git-token $GITHUB_PAT || echo "update-token FAILED: $?"
       
       # Step 2: Configure source control (without manual-integration flag)
       echo "Configuring source control..."
@@ -207,13 +212,13 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
         --resource-group $RG_NAME \
         --repo-url $REPO_URL \
         --branch $BRANCH \
-        --repository-type github
+        --repository-type github || echo "config FAILED: $?"
       
       # Step 3: Trigger initial deployment
       echo "Triggering initial deployment..."
       az webapp deployment source sync \
         --name $WEBAPP_NAME \
-        --resource-group $RG_NAME
+        --resource-group $RG_NAME || echo "sync FAILED: $?"
       
       echo "GitHub deployment configured and initial sync completed!"
     '''
