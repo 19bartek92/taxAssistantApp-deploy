@@ -159,7 +159,7 @@ resource nsaDetailKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   name: 'setupGithubToken'
   location: location
-  kind: 'AzurePowerShell'
+  kind: 'AzureCLI'
   dependsOn: [
     webApp
     keyVaultAccessPolicy
@@ -169,7 +169,7 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     roleAssignment
   ]
   properties: {
-    azPowerShellVersion: '11.0'
+    azCliVersion: '2.53.0'
     environmentVariables: [
       { name: 'WEBAPP_NAME', value: webAppName }
       { name: 'RG_NAME', value: resourceGroup().name }
@@ -178,10 +178,33 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
       { name: 'BRANCH', value: repositoryBranch }
     ]
     scriptContent: '''
-      Write-Host "Configuring GitHub deployment..."
-      Start-Sleep -Seconds 30
-      az webapp deployment source update-token --git-token $env:GITHUB_PAT
-      az webapp deployment source config --name $env:WEBAPP_NAME --resource-group $env:RG_NAME --repo-url $env:REPO_URL --branch $env:BRANCH --manual-integration
+      echo "Waiting for managed identity propagation..."
+      max_attempts=12
+      attempt=1
+      
+      while [ $attempt -le $max_attempts ]; do
+        echo "Attempt $attempt/$max_attempts - Checking identity..."
+        
+        identity=$(az identity show --name deployment-identity --resource-group $RG_NAME --query principalId -o tsv 2>/dev/null)
+        if [ ! -z "$identity" ] && [ "$identity" != "" ]; then
+          echo "Identity found: $identity"
+          break
+        fi
+        
+        if [ $attempt -eq $max_attempts ]; then
+          echo "ERROR: Identity propagation timeout after $((max_attempts * 10)) seconds"
+          exit 1
+        fi
+        
+        echo "Identity not ready yet, waiting 10 seconds..."
+        sleep 10
+        attempt=$((attempt + 1))
+      done
+      
+      echo "Configuring GitHub deployment..."
+      az webapp deployment source update-token --git-token $GITHUB_PAT
+      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \
+        --repo-url $REPO_URL --branch $BRANCH --manual-integration
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'

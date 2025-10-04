@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "9106896766348580348"
+      "templateHash": "2181287449569977718"
     }
   },
   "parameters": {
@@ -238,9 +238,9 @@
       "apiVersion": "2023-08-01",
       "name": "setupGithubToken",
       "location": "[parameters('location')]",
-      "kind": "AzurePowerShell",
+      "kind": "AzureCLI",
       "properties": {
-        "azPowerShellVersion": "11.0",
+        "azCliVersion": "2.53.0",
         "environmentVariables": [
           {
             "name": "WEBAPP_NAME",
@@ -263,7 +263,7 @@
             "value": "[parameters('repositoryBranch')]"
           }
         ],
-        "scriptContent": "      Write-Host \"Configuring GitHub deployment...\"\n      Start-Sleep -Seconds 30\n      az webapp deployment source update-token --git-token $env:GITHUB_PAT\n      az webapp deployment source config --name $env:WEBAPP_NAME --resource-group $env:RG_NAME --repo-url $env:REPO_URL --branch $env:BRANCH --manual-integration\n    ",
+        "scriptContent": "      echo \"Waiting for managed identity propagation...\"\n      max_attempts=12\n      attempt=1\n      \n      while [ $attempt -le $max_attempts ]; do\n        echo \"Attempt $attempt/$max_attempts - Checking identity...\"\n        \n        identity=$(az identity show --name deployment-identity --resource-group $RG_NAME --query principalId -o tsv 2>/dev/null)\n        if [ ! -z \"$identity\" ] && [ \"$identity\" != \"\" ]; then\n          echo \"Identity found: $identity\"\n          break\n        fi\n        \n        if [ $attempt -eq $max_attempts ]; then\n          echo \"ERROR: Identity propagation timeout after $((max_attempts * 10)) seconds\"\n          exit 1\n        fi\n        \n        echo \"Identity not ready yet, waiting 10 seconds...\"\n        sleep 10\n        attempt=$((attempt + 1))\n      done\n      \n      echo \"Configuring GitHub deployment...\"\n      az webapp deployment source update-token --git-token $GITHUB_PAT\n      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \\\n        --repo-url $REPO_URL --branch $BRANCH --manual-integration\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"
