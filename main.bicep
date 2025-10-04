@@ -190,7 +190,7 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
       echo "Configuring source control for app..."
       az rest --method PUT \
         --url "https://management.azure.com/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$WEBAPP_NAME/sourcecontrols/web?api-version=2023-01-01" \
-        --body "{\"properties\":{\"repoUrl\":\"$REPO_URL\",\"branch\":\"$BRANCH\",\"isManualIntegration\":true}}"
+        --body "{\"properties\":{\"repoUrl\":\"$REPO_URL\",\"branch\":\"$BRANCH\",\"isManualIntegration\":false}}"
       
       # Trigger initial deployment
       echo "Triggering initial deployment..."
