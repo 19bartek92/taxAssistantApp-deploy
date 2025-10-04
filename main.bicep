@@ -170,6 +170,16 @@ resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
+// Additional role for Website Contributor to manage deployment sources
+resource websiteContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, managedIdentity.id, 'de139f84-1756-47ae-9be6-808fbbe84772')
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'de139f84-1756-47ae-9be6-808fbbe84772') // Website Contributor
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   name: 'setupGitHubDeployment'
   location: location
@@ -180,6 +190,7 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
     nsaDetailKeySecret
     managedIdentity
     roleAssignment
+    websiteContributorRole
   ]
   properties: {
     azCliVersion: '2.53.0'
