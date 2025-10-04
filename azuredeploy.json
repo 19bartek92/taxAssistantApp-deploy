@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "9487793658444624134"
+      "templateHash": "10894780839994670511"
     }
   },
   "parameters": {
@@ -263,7 +263,7 @@
             "value": "[parameters('repositoryBranch')]"
           }
         ],
-        "scriptContent": "      az webapp deployment source update-token --github-pat $GITHUB_PAT\n      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \\\n        --repo-url $REPO_URL --branch $BRANCH --github-action --manual-integration false\n    ",
+        "scriptContent": "      az webapp deployment source update-token --git-token $GITHUB_PAT\n      az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \\\n        --repo-url $REPO_URL --branch $BRANCH --manual-integration false\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"

@@ -176,9 +176,9 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
       { name: 'BRANCH', value: repositoryBranch }
     ]
     scriptContent: '''
-      az webapp deployment source update-token --github-pat $GITHUB_PAT
+      az webapp deployment source update-token --git-token $GITHUB_PAT
       az webapp deployment source config --name $WEBAPP_NAME --resource-group $RG_NAME \
-        --repo-url $REPO_URL --branch $BRANCH --github-action --manual-integration false
+        --repo-url $REPO_URL --branch $BRANCH --manual-integration false
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'
