@@ -1,0 +1,246 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.38.5.1644",
+      "templateHash": "633481377762848919"
+    }
+  },
+  "parameters": {
+    "appServicePlanName": {
+      "type": "string",
+      "defaultValue": "taxassistant-plan",
+      "metadata": {
+        "description": "Name of the App Service Plan"
+      }
+    },
+    "webAppName": {
+      "type": "string",
+      "defaultValue": "[format('taxassistant-{0}', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "Name of the Web App"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "West Europe",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "sku": {
+      "type": "string",
+      "defaultValue": "F1",
+      "allowedValues": [
+        "F1",
+        "B1",
+        "B2",
+        "S1",
+        "S2",
+        "P1v3",
+        "P2v3"
+      ],
+      "metadata": {
+        "description": "SKU for App Service Plan"
+      }
+    },
+    "repositoryUrl": {
+      "type": "string",
+      "defaultValue": "https://github.com/19bartek92/taxAssistantApp.git",
+      "metadata": {
+        "description": "Git repository URL"
+      }
+    },
+    "repositoryBranch": {
+      "type": "string",
+      "defaultValue": "main",
+      "metadata": {
+        "description": "Git repository branch"
+      }
+    },
+    "nsaSearchApiKey": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "NSA Search API Key"
+      }
+    },
+    "nsaDetailApiKey": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "NSA Detail API Key"
+      }
+    },
+    "keyVaultName": {
+      "type": "string",
+      "defaultValue": "[format('kv-{0}', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "Key Vault Name"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('appServicePlanName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('sku')]",
+        "tier": "[if(equals(parameters('sku'), 'F1'), 'Free', if(equals(parameters('sku'), 'B1'), 'Basic', if(equals(parameters('sku'), 'B2'), 'Basic', if(equals(parameters('sku'), 'S1'), 'Standard', if(equals(parameters('sku'), 'S2'), 'Standard', 'PremiumV3')))))]"
+      },
+      "kind": "app",
+      "properties": {
+        "reserved": false
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[parameters('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "tenantId": "[subscription().tenantId]",
+        "enableRbacAuthorization": false,
+        "accessPolicies": []
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('webAppName')]",
+      "location": "[parameters('location')]",
+      "kind": "app",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "siteConfig": {
+          "netFrameworkVersion": "v8.0",
+          "metadata": [
+            {
+              "name": "CURRENT_STACK",
+              "value": "dotnet"
+            }
+          ],
+          "appSettings": [
+            {
+              "name": "ASPNETCORE_ENVIRONMENT",
+              "value": "Production"
+            },
+            {
+              "name": "WEBSITE_RUN_FROM_PACKAGE",
+              "value": "1"
+            },
+            {
+              "name": "KeyVaultUri",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri]"
+            }
+          ],
+          "alwaysOn": "[and(not(equals(parameters('sku'), 'F1')), not(equals(parameters('sku'), 'B1')))]",
+          "httpLoggingEnabled": true,
+          "logsDirectorySizeLimit": 35,
+          "detailedErrorLoggingEnabled": true,
+          "ftpsState": "Disabled",
+          "minTlsVersion": "1.2",
+          "scmMinTlsVersion": "1.2",
+          "use32BitWorkerProcess": "[equals(parameters('sku'), 'F1')]",
+          "webSocketsEnabled": true
+        },
+        "httpsOnly": true,
+        "publicNetworkAccess": "Enabled"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/accessPolicies",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}/{1}', parameters('keyVaultName'), 'add')]",
+      "properties": {
+        "accessPolicies": [
+          {
+            "tenantId": "[subscription().tenantId]",
+            "objectId": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2023-01-01', 'full').identity.principalId]",
+            "permissions": {
+              "secrets": [
+                "get",
+                "list"
+              ]
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}/{1}', parameters('keyVaultName'), 'nsa-search-key')]",
+      "properties": {
+        "value": "[parameters('nsaSearchApiKey')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}/{1}', parameters('keyVaultName'), 'nsa-detail-key')]",
+      "properties": {
+        "value": "[parameters('nsaDetailApiKey')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('repositoryUrl')))]",
+      "type": "Microsoft.Web/sites/sourcecontrols",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'web')]",
+      "properties": {
+        "repoUrl": "[parameters('repositoryUrl')]",
+        "branch": "[parameters('repositoryBranch')]",
+        "isManualIntegration": false,
+        "isGitHubAction": false,
+        "deploymentRollbackEnabled": false,
+        "isMercurial": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults/accessPolicies', parameters('keyVaultName'), 'add')]",
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-detail-key')]",
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-search-key')]",
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "webAppUrl": {
+      "type": "string",
+      "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2023-01-01').defaultHostName)]"
+    },
+    "webAppName": {
+      "type": "string",
+      "value": "[parameters('webAppName')]"
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "value": "[resourceGroup().name]"
+    }
+  }
+}

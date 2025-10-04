@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "appServicePlanName": {
+      "value": "taxassistant-plan"
+    },
+    "webAppName": {
+      "value": "taxassistant-app"
+    },
+    "sku": {
+      "value": "F1"
+    },
+    "repositoryUrl": {
+      "value": "https://github.com/19bartek92/taxAssistantApp"
+    },
+    "repositoryBranch": {
+      "value": "main"
+    },
+    "nsaSearchApiKey": {
+      "value": ""
+    },
+    "nsaDetailApiKey": {
+      "value": ""
+    },
+    "gitHubPat": {
+      "value": ""
+    }
+  }
+}
