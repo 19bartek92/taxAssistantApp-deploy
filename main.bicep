@@ -175,7 +175,6 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
   location: location
   kind: 'AzureCLI'
   dependsOn: [
-    webApp
     keyVaultAccessPolicy
     nsaSearchKeySecret
     nsaDetailKeySecret
@@ -185,7 +184,7 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
   properties: {
     azCliVersion: '2.53.0'
     environmentVariables: [
-      { name: 'WEBAPP_NAME', value: webAppName }
+      { name: 'WEBAPP_NAME', value: webApp.name }
       { name: 'RG_NAME', value: resourceGroup().name }
       { name: 'GITHUB_PAT', secureValue: gitHubPat }
       { name: 'REPO_URL', value: repositoryUrl }
