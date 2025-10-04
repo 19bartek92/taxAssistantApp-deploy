@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "11734672569064760768"
+      "templateHash": "9487793658444624134"
     }
   },
   "parameters": {
@@ -267,9 +267,6 @@
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"
-      },
-      "identity": {
-        "type": "SystemAssigned"
       },
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults/accessPolicies', parameters('keyVaultName'), 'add')]",

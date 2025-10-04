@@ -184,9 +184,6 @@ resource setGhToken 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     retentionInterval: 'P1D'
     timeout: 'PT10M'
   }
-  identity: {
-    type: 'SystemAssigned'
-  }
 }
 
 output webAppUrl string = 'https://${webApp.properties.defaultHostName}'
