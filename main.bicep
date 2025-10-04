@@ -19,7 +19,11 @@ param location string = 'West Europe'
 ])
 param sku string = 'F1'
 
-// Repository configuration will be done via GitHub App in Azure Portal
+@description('Git repository URL')
+param repositoryUrl string = 'https://github.com/19bartek92/taxAssistantApp.git'
+
+@description('Git repository branch')
+param repositoryBranch string = 'main'
 
 @description('NSA Search API Key')
 @secure()
@@ -29,7 +33,9 @@ param nsaSearchApiKey string = ''
 @secure()
 param nsaDetailApiKey string = ''
 
-// GitHub integration will be configured via GitHub App (no PAT needed)
+@description('GitHub PAT used to configure Deployment Center')
+@secure()
+param gitHubPat string
 
 @description('Key Vault Name')
 param keyVaultName string = 'kv-${uniqueString(resourceGroup().id)}'
@@ -150,7 +156,66 @@ resource nsaDetailKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
-// GitHub integration will be configured manually via Azure Portal using GitHub App
+resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: 'setupGitHubDeployment'
+  location: location
+  kind: 'AzureCLI'
+  dependsOn: [
+    webApp
+    keyVaultAccessPolicy
+    nsaSearchKeySecret
+    nsaDetailKeySecret
+  ]
+  properties: {
+    azCliVersion: '2.53.0'
+    environmentVariables: [
+      { name: 'WEBAPP_NAME', value: webAppName }
+      { name: 'RG_NAME', value: resourceGroup().name }
+      { name: 'GITHUB_PAT', secureValue: gitHubPat }
+      { name: 'REPO_URL', value: repositoryUrl }
+      { name: 'BRANCH', value: repositoryBranch }
+    ]
+    scriptContent: '''
+      echo "Configuring GitHub deployment using Azure CLI..."
+      
+      # Configure source control with GitHub PAT
+      echo "Setting up source control..."
+      az webapp deployment source config \
+        --name $WEBAPP_NAME \
+        --resource-group $RG_NAME \
+        --repo-url $REPO_URL \
+        --branch $BRANCH \
+        --git-token $GITHUB_PAT \
+        --repository-type github \
+        --manual-integration false
+      
+      echo "GitHub deployment configured successfully!"
+    '''
+    cleanupPreference: 'OnSuccess'
+    retentionInterval: 'P1D'
+    timeout: 'PT10M'
+  }
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentity.id}': {}
+    }
+  }
+}
+
+resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'deployment-identity'
+  location: location
+}
+
+resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, managedIdentity.id, 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
 
 output webAppUrl string = 'https://${webApp.properties.defaultHostName}'
 output webAppName string = webApp.name
