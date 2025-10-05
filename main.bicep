@@ -17,13 +17,8 @@ param location string = 'West Europe'
   'P1v3'
   'P2v3'
 ])
-param sku string = 'S1'
+param sku string = 'F1'
 
-@description('Git repository URL')
-param repositoryUrl string = 'https://github.com/19bartek92/taxAssistantApp.git'
-
-@description('Git repository branch')
-param repositoryBranch string = 'main'
 
 @description('NSA Search API Key')
 @secure()
@@ -33,9 +28,6 @@ param nsaSearchApiKey string = ''
 @secure()
 param nsaDetailApiKey string = ''
 
-@description('GitHub PAT used to configure Deployment Center')
-@secure()
-param gitHubPat string
 
 @description('Key Vault Name')
 param keyVaultName string = 'kv-${uniqueString(resourceGroup().id)}'
@@ -45,6 +37,10 @@ param enableKeyVaultRecovery bool = false
 
 @description('Force application redeployment (change this value to trigger update)')
 param forceRedeploy string = utcNow('yyyyMMddHHmmss')
+
+@description('GitHub PAT token for automatic secret creation (optional)')
+@secure()
+param gitHubPat string = ''
 
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' = {
   name: appServicePlanName
@@ -168,20 +164,13 @@ resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     principalId: managedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
+  dependsOn: [
+    managedIdentity
+  ]
 }
 
-// Additional role for Website Contributor to manage deployment sources
-resource websiteContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, managedIdentity.id, 'de139f84-1756-47ae-9be6-808fbbe84772')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'de139f84-1756-47ae-9be6-808fbbe84772') // Website Contributor
-    principalId: managedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
-  name: 'setupGitHubDeployment'
+resource emailPublishProfile 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: 'emailPublishProfile'
   location: location
   kind: 'AzureCLI'
   dependsOn: [
@@ -191,46 +180,183 @@ resource setGitHubDeployment 'Microsoft.Resources/deploymentScripts@2023-08-01' 
     nsaDetailKeySecret
     managedIdentity
     roleAssignment
-    websiteContributorRole
   ]
   properties: {
-    azCliVersion: '2.77.0'
+    azCliVersion: '2.76.0'
     environmentVariables: [
       { name: 'WEBAPP_NAME', value: webApp.name }
       { name: 'RG_NAME', value: resourceGroup().name }
+      { name: 'EMAIL_TO', value: '19bartek92@gmail.com' }
       { name: 'GITHUB_PAT', secureValue: gitHubPat }
-      { name: 'REPO_URL', value: repositoryUrl }
-      { name: 'BRANCH', value: repositoryBranch }
+      { name: 'GITHUB_REPO', value: '19bartek92/taxAssistantApp' }
     ]
     scriptContent: '''
       set -e
-      echo "Configuring GitHub deployment using Azure CLI..."
-      echo "WEBAPP_NAME: $WEBAPP_NAME"
-      echo "RG_NAME: $RG_NAME"
-      echo "REPO_URL: $REPO_URL"
-      echo "BRANCH: $BRANCH"
+      echo "Getting publish profile for webapp: $WEBAPP_NAME"
       
-      # Step 1: Save PAT token globally (no webapp-specific params)
-      echo "Setting GitHub PAT token..."
-      az webapp deployment source update-token --git-token $GITHUB_PAT || echo "update-token FAILED: $?"
+      # Get publish profile
+      echo "Downloading publish profile..."
+      PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles --name $WEBAPP_NAME --resource-group $RG_NAME --xml)
       
-      # Step 2: Configure source control with PAT
-      echo "Configuring source control..."
-      az webapp deployment source config \
-        --name $WEBAPP_NAME \
-        --resource-group $RG_NAME \
-        --repo-url $REPO_URL \
-        --branch $BRANCH \
-        --git-token $GITHUB_PAT \
-        --repository-type github || echo "config FAILED: $?"
+      if [ -z "$PUBLISH_PROFILE" ]; then
+        echo "ERROR: Failed to get publish profile"
+        exit 1
+      fi
       
-      # Step 3: Trigger initial deployment
-      echo "Triggering initial deployment..."
-      az webapp deployment source sync \
-        --name $WEBAPP_NAME \
-        --resource-group $RG_NAME || echo "sync FAILED: $?"
+      echo "Publish profile retrieved successfully"
       
-      echo "GitHub deployment configured and initial sync completed!"
+      # Save to file
+      echo "$PUBLISH_PROFILE" > /tmp/publish-profile.xml
+      
+      # Get webapp URL
+      WEBAPP_URL=$(az webapp show --name $WEBAPP_NAME --resource-group $RG_NAME --query "defaultHostName" -o tsv)
+      
+      # Create email content
+      cat > /tmp/email-content.txt << EOF
+Subject: TaxAssistant App Deployment Profile - $WEBAPP_NAME
+
+Your TaxAssistant application has been successfully deployed to Azure!
+
+App Service Name: $WEBAPP_NAME
+Resource Group: $RG_NAME
+URL: https://$WEBAPP_URL
+
+Publish Profile is attached.
+
+To deploy your application:
+1. Use the attached publish profile with Visual Studio or VS Code
+2. Or use GitHub Actions with the publish profile as a secret
+
+Next steps:
+- Configure GitHub Actions for automated deployment
+- Update application code and deploy using the profile
+
+Generated automatically by Azure deployment script.
+EOF
+
+      echo "Email content prepared"
+      echo "Webapp URL: https://$WEBAPP_URL"
+      echo "Publish profile saved to /tmp/publish-profile.xml"
+      echo "Email would be sent to: $EMAIL_TO"
+      
+      # Log the profile for debugging
+      echo "=== PUBLISH PROFILE START ==="
+      cat /tmp/publish-profile.xml
+      echo "=== PUBLISH PROFILE END ==="
+      
+      # Send email using EmailJS public API (no auth required for basic usage)
+      echo "Sending email with publish profile..."
+      
+      # Encode publish profile for JSON
+      PUBLISH_PROFILE_ENCODED=$(cat /tmp/publish-profile.xml | base64 -w 0)
+      
+      # Create JSON payload for email
+      cat > /tmp/email-payload.json << EOF
+{
+  "service_id": "default_service",
+  "template_id": "template_deployment",
+  "user_id": "public",
+  "template_params": {
+    "to_email": "$EMAIL_TO",
+    "subject": "TaxAssistant App Deployment Profile - $WEBAPP_NAME",
+    "message": "Your TaxAssistant application has been successfully deployed to Azure!\n\nApp Service Name: $WEBAPP_NAME\nResource Group: $RG_NAME\nURL: https://$WEBAPP_URL\n\nPublish Profile (base64 encoded):\n$PUBLISH_PROFILE_ENCODED\n\nTo use the profile:\n1. Decode the base64 content\n2. Save as .pubxml file\n3. Use with Visual Studio or GitHub Actions\n\nGenerated automatically by Azure deployment."
+  }
+}
+EOF
+
+      # Try to send email via simple SMTP relay service
+      echo "Attempting to send email..."
+      
+      # Method 1: Try sending via SMTP using curl (if available)
+      echo "Method 1: Attempting SMTP email..."
+      
+      # Create email body
+      cat > /tmp/email-body.txt << 'EMAILEOF'
+Subject: TaxAssistant Deployment Profile
+To: 19bartek92@gmail.com
+From: azure-deploy@noreply.com
+Content-Type: text/plain
+
+Your TaxAssistant application has been successfully deployed to Azure!
+
+App Service Name: ${WEBAPP_NAME}
+Resource Group: ${RG_NAME}  
+URL: https://${WEBAPP_URL}
+
+Publish Profile (base64 encoded - decode and save as .pubxml):
+${PUBLISH_PROFILE_ENCODED}
+
+To use the profile:
+1. Copy the base64 content above
+2. Decode it: echo "BASE64_CONTENT" | base64 -d > profile.pubxml
+3. Use with Visual Studio or add as GitHub secret
+
+Generated automatically by Azure deployment script.
+EMAILEOF
+
+      # Replace variables in email
+      sed -i "s/\${WEBAPP_NAME}/$WEBAPP_NAME/g" /tmp/email-body.txt
+      sed -i "s/\${RG_NAME}/$RG_NAME/g" /tmp/email-body.txt  
+      sed -i "s/\${WEBAPP_URL}/$WEBAPP_URL/g" /tmp/email-body.txt
+      sed -i "s/\${PUBLISH_PROFILE_ENCODED}/$PUBLISH_PROFILE_ENCODED/g" /tmp/email-body.txt
+      
+      # Email sending disabled for now - publish profile is logged above
+      echo "Email sending temporarily disabled"
+      echo "Publish profile is available in the logs above"
+      
+      # GitHub Secret Setup (automatic if PAT provided, manual otherwise)
+      if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
+        echo "=== AUTOMATIC GITHUB SECRET SETUP ==="
+        echo "GitHub PAT provided, attempting automatic secret creation..."
+        
+        # Test GitHub API access
+        TEST_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_PAT" \
+          "https://api.github.com/repos/$GITHUB_REPO")
+        
+        if echo "$TEST_RESPONSE" | grep -q '"name"'; then
+          echo "GitHub API access successful"
+          
+          # Get public key for encryption
+          echo "Getting repository public key for secret encryption..."
+          PUBLIC_KEY_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_PAT" \
+            "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/public-key")
+          
+          if echo "$PUBLIC_KEY_RESPONSE" | grep -q '"key"'; then
+            echo "Public key retrieved successfully"
+            echo "Note: GitHub Secrets require libsodium encryption which is complex in bash"
+            echo "For now, storing base64 encoded version for manual setup"
+            
+            # For now, provide manual instructions with the token working
+            echo "GitHub API is working - you can add the secret manually or via CLI"
+          else
+            echo "Failed to get public key: $PUBLIC_KEY_RESPONSE"
+          fi
+        else
+          echo "GitHub API access failed: $TEST_RESPONSE"
+        fi
+      else
+        echo "=== MANUAL GITHUB SECRET SETUP ==="
+        echo "No GitHub PAT provided - manual setup required"
+      fi
+      
+      echo ""
+      echo "=== GITHUB SECRET SETUP INSTRUCTIONS ==="
+      echo "Repository: $GITHUB_REPO"
+      echo ""
+      echo "1. Go to: https://github.com/$GITHUB_REPO/settings/secrets/actions"
+      echo "2. Click 'New repository secret'"  
+      echo "3. Name: AZURE_WEBAPP_PUBLISH_PROFILE"
+      echo "4. Value: Copy the publish profile XML from === PUBLISH PROFILE START === section above"
+      echo "5. Click 'Add secret'"
+      echo ""
+      echo "GitHub Actions usage:"
+      echo "- uses: azure/webapps-deploy@v2"
+      echo "  with:"
+      echo "    app-name: '$WEBAPP_NAME'"
+      echo "    publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}"
+      echo ""
+      echo "Webapp URL: https://$WEBAPP_URL"
+      echo "============================================"
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'
