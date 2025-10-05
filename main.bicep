@@ -175,17 +175,7 @@ resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   ]
 }
 
-resource websiteContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, managedIdentity.id, 'de139f84-1756-47ae-9be6-808fbbe84772')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'de139f84-1756-47ae-9be6-808fbbe84772') // Website Contributor
-    principalId: managedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-  dependsOn: [
-    managedIdentity
-  ]
-}
+// Website Contributor role removed - not needed for OIDC approach
 
 resource githubOidcSetup 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   name: 'githubOidcSetup'
@@ -198,7 +188,6 @@ resource githubOidcSetup 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
     nsaDetailKeySecret
     managedIdentity
     roleAssignment
-    websiteContributorRole
   ]
   properties: {
     azCliVersion: '2.76.0'
@@ -229,15 +218,15 @@ resource githubOidcSetup 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
         exit 1
       fi
       
-      CLIENT_ID=$(echo "$APP_RESPONSE" | jq -r '.appId')
-      APP_OBJECT_ID=$(echo "$APP_RESPONSE" | jq -r '.id')
+      CLIENT_ID=$(echo "$APP_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['appId'])")
+      APP_OBJECT_ID=$(echo "$APP_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])")
       
       echo "✅ Created Azure AD Application: $CLIENT_ID"
       
       # Create service principal
       echo "Creating service principal..."
       SP_RESPONSE=$(az ad sp create --id "$CLIENT_ID")
-      SP_OBJECT_ID=$(echo "$SP_RESPONSE" | jq -r '.id')
+      SP_OBJECT_ID=$(echo "$SP_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])")
       
       echo "✅ Created Service Principal: $SP_OBJECT_ID"
       
@@ -280,10 +269,8 @@ EOF
         echo "=== AUTOMATIC GITHUB SECRETS SETUP ==="
         echo "GitHub PAT provided, setting up OIDC secrets..."
         
-        # Install dependencies for encryption
-        apt-get update
-        apt-get install -y python3-pip
-        pip3 install pynacl
+        # Note: PyNaCl installation not available in deployment script environment
+        # Will use Python base64 encoding and disable automatic secret creation
         
         # Test GitHub API access
         TEST_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_PAT" \
@@ -297,58 +284,12 @@ EOF
             "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/public-key")
           
           if echo "$PUBLIC_KEY_RESPONSE" | grep -q '"key"'; then
-            PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key')
-            KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key_id')
+            PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['key'])")
+            KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['key_id'])")
             
-            # Create encryption script
-            cat > /tmp/encrypt_secret.py << 'PYEOF'
-import base64
-import sys
-from nacl import encoding, public
-from nacl.public import SealedBox
-
-def encrypt_secret(public_key_b64, secret_value):
-    public_key = public.PublicKey(public_key_b64.encode("utf-8"), encoder=encoding.Base64Encoder())
-    sealed_box = SealedBox(public_key)
-    encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
-    return base64.b64encode(encrypted).decode("utf-8")
-
-if __name__ == "__main__":
-    public_key = sys.argv[1]
-    secret = sys.argv[2]
-    encrypted = encrypt_secret(public_key, secret)
-    print(encrypted)
-PYEOF
-            
-            # Create secrets
-            echo "Creating GitHub secrets..."
-            
-            # AZURE_CLIENT_ID
-            ENCRYPTED_CLIENT_ID=$(python3 /tmp/encrypt_secret.py "$PUBLIC_KEY" "$CLIENT_ID")
-            curl -s -X PUT \
-              -H "Authorization: token $GITHUB_PAT" \
-              -H "Content-Type: application/json" \
-              -d "{\"encrypted_value\":\"$ENCRYPTED_CLIENT_ID\",\"key_id\":\"$KEY_ID\"}" \
-              "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/AZURE_CLIENT_ID"
-            
-            # AZURE_TENANT_ID  
-            ENCRYPTED_TENANT_ID=$(python3 /tmp/encrypt_secret.py "$PUBLIC_KEY" "$TENANT_ID")
-            curl -s -X PUT \
-              -H "Authorization: token $GITHUB_PAT" \
-              -H "Content-Type: application/json" \
-              -d "{\"encrypted_value\":\"$ENCRYPTED_TENANT_ID\",\"key_id\":\"$KEY_ID\"}" \
-              "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/AZURE_TENANT_ID"
-            
-            # AZURE_SUBSCRIPTION_ID
-            ENCRYPTED_SUBSCRIPTION_ID=$(python3 /tmp/encrypt_secret.py "$PUBLIC_KEY" "$SUBSCRIPTION_ID")
-            curl -s -X PUT \
-              -H "Authorization: token $GITHUB_PAT" \
-              -H "Content-Type: application/json" \
-              -d "{\"encrypted_value\":\"$ENCRYPTED_SUBSCRIPTION_ID\",\"key_id\":\"$KEY_ID\"}" \
-              "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/AZURE_SUBSCRIPTION_ID"
-            
-            echo "✅ SUCCESS: GitHub OIDC secrets created!"
-            echo "Secrets: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID"
+            echo "❌ Automatic secret creation requires libsodium encryption"
+            echo "PyNaCl not available in deployment script environment"
+            echo "GitHub secrets must be created manually"
           else
             echo "❌ Failed to get repository public key"
           fi
@@ -381,6 +322,9 @@ PYEOF
       echo "    subscription-id: \${{ secrets.AZURE_SUBSCRIPTION_ID }}"
       echo ""
       echo "App URL: https://$(az webapp show --name $WEBAPP_NAME --resource-group $RG_NAME --query defaultHostName -o tsv)"
+      
+      # Output CLIENT_ID for ARM template outputs (DeploymentScript result)
+      echo "{\"clientId\": \"$CLIENT_ID\"}" > $AZ_SCRIPTS_OUTPUT_PATH
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'
@@ -399,7 +343,7 @@ output webAppName string = webApp.name
 output resourceGroupName string = resourceGroup().name
 
 // OIDC outputs for GitHub Actions
-output clientId string = 'Will be created by deployment script'
+output clientId string = githubOidcSetup.properties.outputs.clientId
 output tenantId string = subscription().tenantId
 output subscriptionId string = subscription().subscriptionId
 output gitHubRepo string = gitHubRepo
