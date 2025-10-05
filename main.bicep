@@ -194,6 +194,17 @@ resource emailPublishProfile 'Microsoft.Resources/deploymentScripts@2023-08-01' 
       set -e
       echo "Getting publish profile for webapp: $WEBAPP_NAME"
       
+      # Install GitHub CLI if GitHub PAT is provided
+      if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
+        echo "Installing GitHub CLI for automatic secret creation..."
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        apt update
+        apt install gh -y
+        echo "GitHub CLI installed successfully"
+      fi
+      
       # Get publish profile
       echo "Downloading publish profile..."
       PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles --name $WEBAPP_NAME --resource-group $RG_NAME --xml)
@@ -316,23 +327,28 @@ EMAILEOF
         if echo "$TEST_RESPONSE" | grep -q '"name"'; then
           echo "GitHub API access successful"
           
-          # Get public key for encryption
-          echo "Getting repository public key for secret encryption..."
-          PUBLIC_KEY_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_PAT" \
-            "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/public-key")
+          # Create GitHub secret with publish profile using GitHub CLI
+          echo "Creating GitHub secret AZURE_WEBAPP_PUBLISH_PROFILE..."
           
-          if echo "$PUBLIC_KEY_RESPONSE" | grep -q '"key"'; then
-            echo "Public key retrieved successfully"
-            echo "Note: GitHub Secrets require libsodium encryption which is complex in bash"
-            echo "For now, storing base64 encoded version for manual setup"
+          # Set up GitHub CLI authentication
+          echo "$GITHUB_PAT" | gh auth login --with-token
+          
+          # Create the secret using GitHub CLI (handles encryption automatically)
+          if echo "$PUBLISH_PROFILE" | gh secret set AZURE_WEBAPP_PUBLISH_PROFILE --repo "$GITHUB_REPO"; then
+            echo "✅ SUCCESS: GitHub secret AZURE_WEBAPP_PUBLISH_PROFILE created!"
+            echo "Secret is ready for use in GitHub Actions"
             
-            # For now, provide manual instructions with the token working
-            echo "GitHub API is working - you can add the secret manually or via CLI"
+            # Verify the secret was created
+            if gh secret list --repo "$GITHUB_REPO" | grep -q "AZURE_WEBAPP_PUBLISH_PROFILE"; then
+              echo "✅ VERIFIED: Secret appears in repository secrets list"
+            fi
           else
-            echo "Failed to get public key: $PUBLIC_KEY_RESPONSE"
+            echo "❌ FAILED to create GitHub secret using GitHub CLI"
+            echo "Falling back to manual setup..."
           fi
         else
           echo "GitHub API access failed: $TEST_RESPONSE"
+          echo "Falling back to manual setup..."
         fi
       else
         echo "=== MANUAL GITHUB SECRET SETUP ==="
