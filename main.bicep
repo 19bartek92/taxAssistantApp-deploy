@@ -38,6 +38,12 @@ param enableKeyVaultRecovery bool = false
 @description('Force application redeployment (change this value to trigger update)')
 param forceRedeploy string = utcNow('yyyyMMddHHmmss')
 
+@description('GitHub repository in format owner/repo')
+param gitHubRepo string = '19bartek92/taxAssistantApp'
+
+@description('GitHub branch for OIDC federation')
+param gitHubBranch string = 'main'
+
 @description('GitHub PAT token for automatic secret creation (optional)')
 @secure()
 param gitHubPat string = ''
@@ -181,8 +187,8 @@ resource websiteContributorRole 'Microsoft.Authorization/roleAssignments@2022-04
   ]
 }
 
-resource emailPublishProfile 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
-  name: 'emailPublishProfile'
+resource githubOidcSetup 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: 'githubOidcSetup'
   location: location
   kind: 'AzureCLI'
   dependsOn: [
@@ -197,139 +203,87 @@ resource emailPublishProfile 'Microsoft.Resources/deploymentScripts@2023-08-01' 
   properties: {
     azCliVersion: '2.76.0'
     environmentVariables: [
-      { name: 'WEBAPP_NAME', value: webApp.name }
       { name: 'RG_NAME', value: resourceGroup().name }
-      { name: 'EMAIL_TO', value: '19bartek92@gmail.com' }
+      { name: 'SUBSCRIPTION_ID', value: subscription().subscriptionId }
+      { name: 'TENANT_ID', value: subscription().tenantId }
       { name: 'GITHUB_PAT', secureValue: gitHubPat }
-      { name: 'GITHUB_REPO', value: '19bartek92/taxAssistantApp' }
+      { name: 'GITHUB_REPO', value: gitHubRepo }
+      { name: 'GITHUB_BRANCH', value: gitHubBranch }
+      { name: 'WEBAPP_NAME', value: webApp.name }
     ]
     scriptContent: '''
       set -e
-      echo "Getting publish profile for webapp: $WEBAPP_NAME"
+      echo "Setting up GitHub OIDC authentication for Azure deployment"
       
-      # Install libsodium for GitHub secret encryption (if PAT provided)
-      if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
-        echo "Installing libsodium for GitHub secret encryption..."
-        apt-get update
-        apt-get install -y libsodium23 libsodium-dev python3-pip
-        pip3 install pynacl
-        echo "libsodium installed successfully"
-      fi
+      # Create Entra Application for GitHub OIDC
+      echo "Creating Entra Application for GitHub OIDC..."
+      APP_NAME="GitHub-OIDC-${WEBAPP_NAME}"
       
-      # Get publish profile
-      echo "Downloading publish profile..."
-      PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles --name $WEBAPP_NAME --resource-group $RG_NAME --xml)
+      # Create Azure AD application
+      APP_RESPONSE=$(az ad app create \
+        --display-name "$APP_NAME" \
+        --sign-in-audience AzureADMyOrg)
       
-      if [ -z "$PUBLISH_PROFILE" ]; then
-        echo "ERROR: Failed to get publish profile"
+      if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to create Azure AD application"
         exit 1
       fi
       
-      echo "Publish profile retrieved successfully"
+      CLIENT_ID=$(echo "$APP_RESPONSE" | jq -r '.appId')
+      APP_OBJECT_ID=$(echo "$APP_RESPONSE" | jq -r '.id')
       
-      # Save to file
-      echo "$PUBLISH_PROFILE" > /tmp/publish-profile.xml
+      echo "✅ Created Azure AD Application: $CLIENT_ID"
       
-      # Get webapp URL
-      WEBAPP_URL=$(az webapp show --name $WEBAPP_NAME --resource-group $RG_NAME --query "defaultHostName" -o tsv)
+      # Create service principal
+      echo "Creating service principal..."
+      SP_RESPONSE=$(az ad sp create --id "$CLIENT_ID")
+      SP_OBJECT_ID=$(echo "$SP_RESPONSE" | jq -r '.id')
       
-      # Create email content
-      cat > /tmp/email-content.txt << EOF
-Subject: TaxAssistant App Deployment Profile - $WEBAPP_NAME
-
-Your TaxAssistant application has been successfully deployed to Azure!
-
-App Service Name: $WEBAPP_NAME
-Resource Group: $RG_NAME
-URL: https://$WEBAPP_URL
-
-Publish Profile is attached.
-
-To deploy your application:
-1. Use the attached publish profile with Visual Studio or VS Code
-2. Or use GitHub Actions with the publish profile as a secret
-
-Next steps:
-- Configure GitHub Actions for automated deployment
-- Update application code and deploy using the profile
-
-Generated automatically by Azure deployment script.
-EOF
-
-      echo "Email content prepared"
-      echo "Webapp URL: https://$WEBAPP_URL"
-      echo "Publish profile saved to /tmp/publish-profile.xml"
-      echo "Email would be sent to: $EMAIL_TO"
+      echo "✅ Created Service Principal: $SP_OBJECT_ID"
       
-      # Log the profile for debugging
-      echo "=== PUBLISH PROFILE START ==="
-      cat /tmp/publish-profile.xml
-      echo "=== PUBLISH PROFILE END ==="
-      
-      # Send email using EmailJS public API (no auth required for basic usage)
-      echo "Sending email with publish profile..."
-      
-      # Encode publish profile for JSON
-      PUBLISH_PROFILE_ENCODED=$(cat /tmp/publish-profile.xml | base64 -w 0)
-      
-      # Create JSON payload for email
-      cat > /tmp/email-payload.json << EOF
+      # Add federated identity credential
+      echo "Adding federated identity credential for GitHub Actions..."
+      CREDENTIAL_BODY=$(cat << EOF
 {
-  "service_id": "default_service",
-  "template_id": "template_deployment",
-  "user_id": "public",
-  "template_params": {
-    "to_email": "$EMAIL_TO",
-    "subject": "TaxAssistant App Deployment Profile - $WEBAPP_NAME",
-    "message": "Your TaxAssistant application has been successfully deployed to Azure!\n\nApp Service Name: $WEBAPP_NAME\nResource Group: $RG_NAME\nURL: https://$WEBAPP_URL\n\nPublish Profile (base64 encoded):\n$PUBLISH_PROFILE_ENCODED\n\nTo use the profile:\n1. Decode the base64 content\n2. Save as .pubxml file\n3. Use with Visual Studio or GitHub Actions\n\nGenerated automatically by Azure deployment."
-  }
+  "name": "github-oidc",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:${GITHUB_REPO}:ref:refs/heads/${GITHUB_BRANCH}",
+  "description": "OIDC login from GitHub Actions",
+  "audiences": ["api://AzureADTokenExchange"]
 }
 EOF
-
-      # Try to send email via simple SMTP relay service
-      echo "Attempting to send email..."
+)
       
-      # Method 1: Try sending via SMTP using curl (if available)
-      echo "Method 1: Attempting SMTP email..."
+      CREDENTIAL_RESPONSE=$(az rest \
+        --method POST \
+        --uri "https://graph.microsoft.com/v1.0/applications/$APP_OBJECT_ID/federatedIdentityCredentials" \
+        --headers "Content-Type=application/json" \
+        --body "$CREDENTIAL_BODY")
       
-      # Create email body
-      cat > /tmp/email-body.txt << 'EMAILEOF'
-Subject: TaxAssistant Deployment Profile
-To: 19bartek92@gmail.com
-From: azure-deploy@noreply.com
-Content-Type: text/plain
-
-Your TaxAssistant application has been successfully deployed to Azure!
-
-App Service Name: ${WEBAPP_NAME}
-Resource Group: ${RG_NAME}  
-URL: https://${WEBAPP_URL}
-
-Publish Profile (base64 encoded - decode and save as .pubxml):
-${PUBLISH_PROFILE_ENCODED}
-
-To use the profile:
-1. Copy the base64 content above
-2. Decode it: echo "BASE64_CONTENT" | base64 -d > profile.pubxml
-3. Use with Visual Studio or add as GitHub secret
-
-Generated automatically by Azure deployment script.
-EMAILEOF
-
-      # Replace variables in email
-      sed -i "s/\${WEBAPP_NAME}/$WEBAPP_NAME/g" /tmp/email-body.txt
-      sed -i "s/\${RG_NAME}/$RG_NAME/g" /tmp/email-body.txt  
-      sed -i "s/\${WEBAPP_URL}/$WEBAPP_URL/g" /tmp/email-body.txt
-      sed -i "s/\${PUBLISH_PROFILE_ENCODED}/$PUBLISH_PROFILE_ENCODED/g" /tmp/email-body.txt
+      if [ $? -eq 0 ]; then
+        echo "✅ Added federated identity credential"
+      else
+        echo "⚠️ Warning: Could not add federated credential (may already exist)"
+      fi
       
-      # Email sending disabled for now - publish profile is logged above
-      echo "Email sending temporarily disabled"
-      echo "Publish profile is available in the logs above"
+      # Assign Contributor role to service principal on resource group
+      echo "Assigning Contributor role to service principal..."
+      az role assignment create \
+        --assignee "$CLIENT_ID" \
+        --role "Contributor" \
+        --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG_NAME"
       
-      # GitHub Secret Setup (automatic if PAT provided, manual otherwise)
+      echo "✅ Assigned Contributor role"
+      
+      # Setup GitHub secrets (if PAT provided)
       if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
-        echo "=== AUTOMATIC GITHUB SECRET SETUP ==="
-        echo "GitHub PAT provided, attempting automatic secret creation..."
+        echo "=== AUTOMATIC GITHUB SECRETS SETUP ==="
+        echo "GitHub PAT provided, setting up OIDC secrets..."
+        
+        # Install dependencies for encryption
+        apt-get update
+        apt-get install -y python3-pip
+        pip3 install pynacl
         
         # Test GitHub API access
         TEST_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_PAT" \
@@ -338,23 +292,15 @@ EMAILEOF
         if echo "$TEST_RESPONSE" | grep -q '"name"'; then
           echo "GitHub API access successful"
           
-          # Create GitHub secret with publish profile using REST API
-          echo "Creating GitHub secret AZURE_WEBAPP_PUBLISH_PROFILE..."
-          
           # Get repository public key for encryption
-          echo "Getting repository public key..."
           PUBLIC_KEY_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_PAT" \
             "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/public-key")
           
           if echo "$PUBLIC_KEY_RESPONSE" | grep -q '"key"'; then
-            echo "Public key retrieved successfully"
+            PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key')
+            KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | jq -r '.key_id')
             
-            # Extract public key and key_id
-            PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | grep -o '\"key\":\"[^\"]*' | cut -d'"' -f4)
-            KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | grep -o '\"key_id\":\"[^\"]*' | cut -d'"' -f4)
-            
-            # Encrypt the publish profile using PyNaCl
-            echo "Encrypting publish profile..."
+            # Create encryption script
             cat > /tmp/encrypt_secret.py << 'PYEOF'
 import base64
 import sys
@@ -374,55 +320,67 @@ if __name__ == "__main__":
     print(encrypted)
 PYEOF
             
-            # Encrypt the profile
-            ENCRYPTED_VALUE=$(python3 /tmp/encrypt_secret.py "$PUBLIC_KEY" "$PUBLISH_PROFILE")
+            # Create secrets
+            echo "Creating GitHub secrets..."
             
-            # Create the secret using REST API
-            SECRET_RESPONSE=$(curl -s -X PUT \
+            # AZURE_CLIENT_ID
+            ENCRYPTED_CLIENT_ID=$(python3 /tmp/encrypt_secret.py "$PUBLIC_KEY" "$CLIENT_ID")
+            curl -s -X PUT \
               -H "Authorization: token $GITHUB_PAT" \
               -H "Content-Type: application/json" \
-              -d "{\"encrypted_value\":\"$ENCRYPTED_VALUE\",\"key_id\":\"$KEY_ID\"}" \
-              "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/AZURE_WEBAPP_PUBLISH_PROFILE")
+              -d "{\"encrypted_value\":\"$ENCRYPTED_CLIENT_ID\",\"key_id\":\"$KEY_ID\"}" \
+              "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/AZURE_CLIENT_ID"
             
-            if [ $? -eq 0 ] && ! echo "$SECRET_RESPONSE" | grep -q '"message"'; then
-              echo "✅ SUCCESS: GitHub secret AZURE_WEBAPP_PUBLISH_PROFILE created!"
-              echo "Secret is ready for use in GitHub Actions"
-            else
-              echo "❌ FAILED to create GitHub secret using REST API"
-              echo "Response: $SECRET_RESPONSE"
-              echo "Falling back to manual setup..."
-            fi
+            # AZURE_TENANT_ID  
+            ENCRYPTED_TENANT_ID=$(python3 /tmp/encrypt_secret.py "$PUBLIC_KEY" "$TENANT_ID")
+            curl -s -X PUT \
+              -H "Authorization: token $GITHUB_PAT" \
+              -H "Content-Type: application/json" \
+              -d "{\"encrypted_value\":\"$ENCRYPTED_TENANT_ID\",\"key_id\":\"$KEY_ID\"}" \
+              "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/AZURE_TENANT_ID"
+            
+            # AZURE_SUBSCRIPTION_ID
+            ENCRYPTED_SUBSCRIPTION_ID=$(python3 /tmp/encrypt_secret.py "$PUBLIC_KEY" "$SUBSCRIPTION_ID")
+            curl -s -X PUT \
+              -H "Authorization: token $GITHUB_PAT" \
+              -H "Content-Type: application/json" \
+              -d "{\"encrypted_value\":\"$ENCRYPTED_SUBSCRIPTION_ID\",\"key_id\":\"$KEY_ID\"}" \
+              "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/AZURE_SUBSCRIPTION_ID"
+            
+            echo "✅ SUCCESS: GitHub OIDC secrets created!"
+            echo "Secrets: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID"
           else
-            echo "Failed to get public key: $PUBLIC_KEY_RESPONSE"
-            echo "Falling back to manual setup..."
+            echo "❌ Failed to get repository public key"
           fi
         else
-          echo "GitHub API access failed: $TEST_RESPONSE"
-          echo "Falling back to manual setup..."
+          echo "❌ GitHub API access failed"
         fi
       else
-        echo "=== MANUAL GITHUB SECRET SETUP ==="
+        echo "=== MANUAL GITHUB SECRETS SETUP ==="
         echo "No GitHub PAT provided - manual setup required"
       fi
       
       echo ""
-      echo "=== GITHUB SECRET SETUP INSTRUCTIONS ==="
-      echo "Repository: $GITHUB_REPO"
+      echo "=== OIDC SETUP COMPLETE ==="
+      echo "Client ID: $CLIENT_ID"
+      echo "Tenant ID: $TENANT_ID"  
+      echo "Subscription ID: $SUBSCRIPTION_ID"
       echo ""
+      echo "GitHub Actions OIDC configuration:"
       echo "1. Go to: https://github.com/$GITHUB_REPO/settings/secrets/actions"
-      echo "2. Click 'New repository secret'"  
-      echo "3. Name: AZURE_WEBAPP_PUBLISH_PROFILE"
-      echo "4. Value: Copy the publish profile XML from === PUBLISH PROFILE START === section above"
-      echo "5. Click 'Add secret'"
+      echo "2. Add these secrets (if not done automatically):"
+      echo "   - AZURE_CLIENT_ID: $CLIENT_ID"
+      echo "   - AZURE_TENANT_ID: $TENANT_ID"
+      echo "   - AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
       echo ""
-      echo "GitHub Actions usage:"
-      echo "- uses: azure/webapps-deploy@v2"
+      echo "GitHub Actions workflow example:"
+      echo "- uses: azure/login@v2"
       echo "  with:"
-      echo "    app-name: '$WEBAPP_NAME'"
-      echo "    publish-profile: \${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}"
+      echo "    client-id: \${{ secrets.AZURE_CLIENT_ID }}"
+      echo "    tenant-id: \${{ secrets.AZURE_TENANT_ID }}"
+      echo "    subscription-id: \${{ secrets.AZURE_SUBSCRIPTION_ID }}"
       echo ""
-      echo "Webapp URL: https://$WEBAPP_URL"
-      echo "============================================"
+      echo "App URL: https://$(az webapp show --name $WEBAPP_NAME --resource-group $RG_NAME --query defaultHostName -o tsv)"
     '''
     cleanupPreference: 'OnSuccess'
     retentionInterval: 'P1D'
@@ -439,3 +397,10 @@ PYEOF
 output webAppUrl string = 'https://${webApp.properties.defaultHostName}'
 output webAppName string = webApp.name
 output resourceGroupName string = resourceGroup().name
+
+// OIDC outputs for GitHub Actions
+output clientId string = 'Will be created by deployment script'
+output tenantId string = subscription().tenantId
+output subscriptionId string = subscription().subscriptionId
+output gitHubRepo string = gitHubRepo
+output gitHubBranch string = gitHubBranch
