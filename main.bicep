@@ -17,7 +17,7 @@ param location string = 'West Europe'
   'P1v3'
   'P2v3'
 ])
-param sku string = 'F1'
+param sku string = 'S1'
 
 
 @description('NSA Search API Key')
@@ -169,6 +169,18 @@ resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   ]
 }
 
+resource websiteContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, managedIdentity.id, 'de139f84-1756-47ae-9be6-808fbbe84772')
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'de139f84-1756-47ae-9be6-808fbbe84772') // Website Contributor
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+  dependsOn: [
+    managedIdentity
+  ]
+}
+
 resource emailPublishProfile 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   name: 'emailPublishProfile'
   location: location
@@ -180,6 +192,7 @@ resource emailPublishProfile 'Microsoft.Resources/deploymentScripts@2023-08-01' 
     nsaDetailKeySecret
     managedIdentity
     roleAssignment
+    websiteContributorRole
   ]
   properties: {
     azCliVersion: '2.76.0'
@@ -194,15 +207,13 @@ resource emailPublishProfile 'Microsoft.Resources/deploymentScripts@2023-08-01' 
       set -e
       echo "Getting publish profile for webapp: $WEBAPP_NAME"
       
-      # Install GitHub CLI if GitHub PAT is provided
+      # Install libsodium for GitHub secret encryption (if PAT provided)
       if [ -n "$GITHUB_PAT" ] && [ "$GITHUB_PAT" != "" ]; then
-        echo "Installing GitHub CLI for automatic secret creation..."
-        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-        chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-        apt update
-        apt install gh -y
-        echo "GitHub CLI installed successfully"
+        echo "Installing libsodium for GitHub secret encryption..."
+        apt-get update
+        apt-get install -y libsodium23 libsodium-dev python3-pip
+        pip3 install pynacl
+        echo "libsodium installed successfully"
       fi
       
       # Get publish profile
@@ -327,23 +338,62 @@ EMAILEOF
         if echo "$TEST_RESPONSE" | grep -q '"name"'; then
           echo "GitHub API access successful"
           
-          # Create GitHub secret with publish profile using GitHub CLI
+          # Create GitHub secret with publish profile using REST API
           echo "Creating GitHub secret AZURE_WEBAPP_PUBLISH_PROFILE..."
           
-          # Set up GitHub CLI authentication
-          echo "$GITHUB_PAT" | gh auth login --with-token
+          # Get repository public key for encryption
+          echo "Getting repository public key..."
+          PUBLIC_KEY_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_PAT" \
+            "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/public-key")
           
-          # Create the secret using GitHub CLI (handles encryption automatically)
-          if echo "$PUBLISH_PROFILE" | gh secret set AZURE_WEBAPP_PUBLISH_PROFILE --repo "$GITHUB_REPO"; then
-            echo "✅ SUCCESS: GitHub secret AZURE_WEBAPP_PUBLISH_PROFILE created!"
-            echo "Secret is ready for use in GitHub Actions"
+          if echo "$PUBLIC_KEY_RESPONSE" | grep -q '"key"'; then
+            echo "Public key retrieved successfully"
             
-            # Verify the secret was created
-            if gh secret list --repo "$GITHUB_REPO" | grep -q "AZURE_WEBAPP_PUBLISH_PROFILE"; then
-              echo "✅ VERIFIED: Secret appears in repository secrets list"
+            # Extract public key and key_id
+            PUBLIC_KEY=$(echo "$PUBLIC_KEY_RESPONSE" | grep -o '\"key\":\"[^\"]*' | cut -d'"' -f4)
+            KEY_ID=$(echo "$PUBLIC_KEY_RESPONSE" | grep -o '\"key_id\":\"[^\"]*' | cut -d'"' -f4)
+            
+            # Encrypt the publish profile using PyNaCl
+            echo "Encrypting publish profile..."
+            cat > /tmp/encrypt_secret.py << 'PYEOF'
+import base64
+import sys
+from nacl import encoding, public
+from nacl.public import SealedBox
+
+def encrypt_secret(public_key_b64, secret_value):
+    public_key = public.PublicKey(public_key_b64.encode("utf-8"), encoder=encoding.Base64Encoder())
+    sealed_box = SealedBox(public_key)
+    encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
+    return base64.b64encode(encrypted).decode("utf-8")
+
+if __name__ == "__main__":
+    public_key = sys.argv[1]
+    secret = sys.argv[2]
+    encrypted = encrypt_secret(public_key, secret)
+    print(encrypted)
+PYEOF
+            
+            # Encrypt the profile
+            ENCRYPTED_VALUE=$(python3 /tmp/encrypt_secret.py "$PUBLIC_KEY" "$PUBLISH_PROFILE")
+            
+            # Create the secret using REST API
+            SECRET_RESPONSE=$(curl -s -X PUT \
+              -H "Authorization: token $GITHUB_PAT" \
+              -H "Content-Type: application/json" \
+              -d "{\"encrypted_value\":\"$ENCRYPTED_VALUE\",\"key_id\":\"$KEY_ID\"}" \
+              "https://api.github.com/repos/$GITHUB_REPO/actions/secrets/AZURE_WEBAPP_PUBLISH_PROFILE")
+            
+            if [ $? -eq 0 ] && ! echo "$SECRET_RESPONSE" | grep -q '"message"'; then
+              echo "✅ SUCCESS: GitHub secret AZURE_WEBAPP_PUBLISH_PROFILE created!"
+              echo "Secret is ready for use in GitHub Actions"
+            else
+              echo "❌ FAILED to create GitHub secret using REST API"
+              echo "Response: $SECRET_RESPONSE"
+              echo "Falling back to manual setup..."
             fi
           else
-            echo "❌ FAILED to create GitHub secret using GitHub CLI"
+            echo "Failed to get public key: $PUBLIC_KEY_RESPONSE"
             echo "Falling back to manual setup..."
           fi
         else
