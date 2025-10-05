@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "13377614415434310929"
+      "templateHash": "106038503209105391"
     }
   },
   "parameters": {
@@ -25,14 +25,14 @@
     },
     "location": {
       "type": "string",
-      "defaultValue": "East US",
+      "defaultValue": "West Europe",
       "metadata": {
         "description": "Location for all resources"
       }
     },
     "sku": {
       "type": "string",
-      "defaultValue": "S1",
+      "defaultValue": "F1",
       "allowedValues": [
         "F1",
         "B1",
@@ -214,6 +214,12 @@
       ]
     },
     {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "deployment-identity",
+      "location": "[parameters('location')]"
+    },
+    {
       "type": "Microsoft.Resources/deploymentScripts",
       "apiVersion": "2023-08-01",
       "name": "emailPublishProfile",
@@ -241,10 +247,14 @@
         "timeout": "PT10M"
       },
       "identity": {
-        "type": "SystemAssigned"
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'))]": {}
+        }
       },
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults/accessPolicies', parameters('keyVaultName'), 'add')]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity')]",
         "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-detail-key')]",
         "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-search-key')]",
         "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
