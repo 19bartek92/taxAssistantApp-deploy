@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.38.5.1644",
-      "templateHash": "18026804211492771692"
+      "templateHash": "6500474639575266200"
     }
   },
   "parameters": {
@@ -46,20 +46,6 @@
         "description": "SKU for App Service Plan"
       }
     },
-    "repositoryUrl": {
-      "type": "string",
-      "defaultValue": "https://github.com/19bartek92/taxAssistantApp.git",
-      "metadata": {
-        "description": "Git repository URL"
-      }
-    },
-    "repositoryBranch": {
-      "type": "string",
-      "defaultValue": "main",
-      "metadata": {
-        "description": "Git repository branch"
-      }
-    },
     "nsaSearchApiKey": {
       "type": "securestring",
       "defaultValue": "",
@@ -72,12 +58,6 @@
       "defaultValue": "",
       "metadata": {
         "description": "NSA Detail API Key"
-      }
-    },
-    "gitHubPat": {
-      "type": "securestring",
-      "metadata": {
-        "description": "GitHub PAT used to configure Deployment Center"
       }
     },
     "keyVaultName": {
@@ -234,41 +214,9 @@
       ]
     },
     {
-      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
-      "apiVersion": "2023-01-31",
-      "name": "deployment-identity",
-      "location": "[parameters('location')]"
-    },
-    {
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "name": "[guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
-      "properties": {
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
-        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), '2023-01-31').principalId]",
-        "principalType": "ServicePrincipal"
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity')]"
-      ]
-    },
-    {
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "name": "[guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), 'de139f84-1756-47ae-9be6-808fbbe84772')]",
-      "properties": {
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'de139f84-1756-47ae-9be6-808fbbe84772')]",
-        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), '2023-01-31').principalId]",
-        "principalType": "ServicePrincipal"
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity')]"
-      ]
-    },
-    {
       "type": "Microsoft.Resources/deploymentScripts",
       "apiVersion": "2023-08-01",
-      "name": "setupGitHubDeployment",
+      "name": "emailPublishProfile",
       "location": "[parameters('location')]",
       "kind": "AzureCLI",
       "properties": {
@@ -283,37 +231,23 @@
             "value": "[resourceGroup().name]"
           },
           {
-            "name": "GITHUB_PAT",
-            "secureValue": "[parameters('gitHubPat')]"
-          },
-          {
-            "name": "REPO_URL",
-            "value": "[parameters('repositoryUrl')]"
-          },
-          {
-            "name": "BRANCH",
-            "value": "[parameters('repositoryBranch')]"
+            "name": "EMAIL_TO",
+            "value": "19bartek92@gmail.com"
           }
         ],
-        "scriptContent": "      set -e\n      echo \"Configuring GitHub deployment using Azure CLI...\"\n      echo \"WEBAPP_NAME: $WEBAPP_NAME\"\n      echo \"RG_NAME: $RG_NAME\"\n      echo \"REPO_URL: $REPO_URL\"\n      echo \"BRANCH: $BRANCH\"\n      \n      # Configure source control with PAT (token passed directly to config command)\n      echo \"Configuring source control...\"\n      if ! az webapp deployment source config \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME \\\n        --repo-url $REPO_URL \\\n        --branch $BRANCH \\\n        --git-token $GITHUB_PAT \\\n        --repository-type github; then\n        echo \"config FAILED with exit code: $?\"\n        echo \"Getting more details about the webapp...\"\n        az webapp show --name $WEBAPP_NAME --resource-group $RG_NAME --query \"{name:name,state:state,hostNames:hostNames}\" || true\n        echo \"Checking deployment source status...\"\n        az webapp deployment source show --name $WEBAPP_NAME --resource-group $RG_NAME || echo \"No deployment source configured yet\"\n        exit 1\n      fi\n      \n      # Trigger initial deployment\n      echo \"Triggering initial deployment...\"\n      if ! az webapp deployment source sync \\\n        --name $WEBAPP_NAME \\\n        --resource-group $RG_NAME; then\n        echo \"sync FAILED with exit code: $?\"\n        echo \"Checking deployment source after config...\"\n        az webapp deployment source show --name $WEBAPP_NAME --resource-group $RG_NAME || echo \"No deployment source found\"\n        exit 1\n      fi\n      \n      echo \"GitHub deployment configured and initial sync completed!\"\n    ",
+        "scriptContent": "      set -e\n      echo \"Getting publish profile for webapp: $WEBAPP_NAME\"\n      \n      # Get publish profile\n      echo \"Downloading publish profile...\"\n      PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles --name $WEBAPP_NAME --resource-group $RG_NAME --xml)\n      \n      if [ -z \"$PUBLISH_PROFILE\" ]; then\n        echo \"ERROR: Failed to get publish profile\"\n        exit 1\n      fi\n      \n      echo \"Publish profile retrieved successfully\"\n      \n      # Save to file\n      echo \"$PUBLISH_PROFILE\" > /tmp/publish-profile.xml\n      \n      # Get webapp URL\n      WEBAPP_URL=$(az webapp show --name $WEBAPP_NAME --resource-group $RG_NAME --query \"defaultHostName\" -o tsv)\n      \n      # Create email content\n      cat > /tmp/email-content.txt << EOF\nSubject: TaxAssistant App Deployment Profile - $WEBAPP_NAME\n\nYour TaxAssistant application has been successfully deployed to Azure!\n\nApp Service Name: $WEBAPP_NAME\nResource Group: $RG_NAME\nURL: https://$WEBAPP_URL\n\nPublish Profile is attached.\n\nTo deploy your application:\n1. Use the attached publish profile with Visual Studio or VS Code\n2. Or use GitHub Actions with the publish profile as a secret\n\nNext steps:\n- Configure GitHub Actions for automated deployment\n- Update application code and deploy using the profile\n\nGenerated automatically by Azure deployment script.\nEOF\n\n      echo \"Email content prepared\"\n      echo \"Webapp URL: https://$WEBAPP_URL\"\n      echo \"Publish profile saved to /tmp/publish-profile.xml\"\n      echo \"Email would be sent to: $EMAIL_TO\"\n      \n      # For now, just log the profile (we'll add actual email sending later)\n      echo \"=== PUBLISH PROFILE START ===\"\n      cat /tmp/publish-profile.xml\n      echo \"=== PUBLISH PROFILE END ===\"\n    ",
         "cleanupPreference": "OnSuccess",
         "retentionInterval": "P1D",
         "timeout": "PT10M"
       },
       "identity": {
-        "type": "UserAssigned",
-        "userAssignedIdentities": {
-          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'))]": {}
-        }
+        "type": "SystemAssigned"
       },
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults/accessPolicies', parameters('keyVaultName'), 'add')]",
-        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity')]",
         "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-detail-key')]",
         "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'nsa-search-key')]",
-        "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), 'b24988ac-6180-42a0-ab88-20f7382dd24c'))]",
-        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]",
-        "[resourceId('Microsoft.Authorization/roleAssignments', guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'deployment-identity'), 'de139f84-1756-47ae-9be6-808fbbe84772'))]"
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
       ]
     }
   ],
